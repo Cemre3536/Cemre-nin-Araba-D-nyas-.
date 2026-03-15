@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cemre Ultra</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; touch-action: none; }
+        
+        /* GİRİŞ EKRANI */
+        #start-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 1000;
+        }
+
+        /* Rengarenk Animasyonlu Köşe Emojileri */
+        .corner { 
+            position: absolute; font-size: 40px; 
+            animation: rainbow 2s infinite linear; 
+        }
+        .tl { top: 30px; left: 30px; transform: rotate(-45deg); }
+        .tr { top: 30px; right: 30px; transform: rotate(45deg); }
+        .bl { bottom: 30px; left: 30px; transform: rotate(45deg); }
+        .br { bottom: 30px; right: 30px; transform: rotate(-45deg); }
+
+        @keyframes rainbow {
+            0% { filter: hue-rotate(0deg); }
+            100% { filter: hue-rotate(360deg); }
+        }
+
+        #welcome {
+            font-size: 70px; font-weight: 900; margin-bottom: 30px;
+            background: linear-gradient(to right, red, yellow, lime, cyan, blue, magenta, red);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: text-rainbow 3s infinite linear;
+            text-align: center;
+        }
+
+        @keyframes text-rainbow {
+            from { filter: hue-rotate(0deg); }
+            to { filter: hue-rotate(360deg); }
+        }
+
+        #play-btn {
+            padding: 20px 50px; font-size: 25px; cursor: pointer;
+            background: #fff; border: none; border-radius: 50px; font-weight: 900;
+            box-shadow: 0 0 20px rgba(255,255,255,0.4); transition: 0.3s;
+        }
+        #play-btn:hover { transform: scale(1.1); background: #ffcc00; }
+
+        /* OYUN İÇİ PANEL */
+        #ui { 
+            position: absolute; top: 20px; left: 20px; color: black; 
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.8); display: none; pointer-events: none;
+        }
+        #speedometer { font-size: 36px; font-weight: bold; color: #ff0000; }
+
+        /* MOBİL KONTROLLER */
+        #controls {
+            position: absolute; bottom: 30px; width: 100%; 
+            display: none; justify-content: space-around; z-index: 10;
+        }
+        .btn {
+            width: 75px; height: 75px; background: rgba(0,0,0,0.1);
+            border: 2px solid black; border-radius: 50%; color: black;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; font-weight: bold; user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <div class="corner tl">🚗</div>
+        <div class="corner tr">🚗</div>
+        <div class="corner bl">🚗</div>
+        <div class="corner br">🚗</div>
+        <div id="welcome">MERHABA</div>
+        <button id="play-btn" onclick="startGame()">OYUNA BAŞLA</button>
+    </div>
+
+    <div id="ui">
+        <div id="speedometer">0 KM/H</div>
+        <p>Yön tuşları ile sür, Boşluk ile fren yap.</p>
+    </div>
+
+    <div id="controls">
+        <div class="btn" id="l-btn">←</div>
+        <div class="btn" id="r-btn">→</div>
+        <div class="btn" id="g-btn" style="background: rgba(0,255,0,0.2)">GAZ</div>
+        <div class="btn" id="b-btn" style="background: rgba(255,0,0,0.2)">FREN</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        let scene, camera, renderer, car;
+        let speed = 0;
+        let active = false;
+        const input = { w: false, s: false, a: false, d: false, space: false };
+
+        function init() {
+            scene = new THREE.Scene();
+            // Gökyüzünü biraz daha aydınlık yapalım ki beyaz yol sırıtmasın
+            scene.background = new THREE.Color(0xeeeeee);
+            scene.fog = new THREE.Fog(0xeeeeee, 40, 300);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 1);
+            sun.position.set(5, 15, 10);
+            scene.add(sun);
+
+            // ARABA (SİYAH TASARIM - BEYAZ YOLDA DAHA İYİ GÖRÜNÜR)
+            car = new THREE.Group();
+            const bodyMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 100 });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.6, 4), bodyMat);
+            car.add(body);
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 2), bodyMat);
+            cabin.position.set(0, 0.55, -0.2);
+            car.add(cabin);
+            scene.add(car);
+
+            // BEYAZ YOL
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(20, 10000),
+                new THREE.MeshPhongMaterial({ color: 0xffffff })
+            );
+            road.rotation.x = -Math.PI / 2;
+            scene.add(road);
+
+            // SİYAH ŞERİTLER (Beyaz yolda sarı yerine siyah daha belirgin olur)
+            for(let i=0; i<400; i++) {
+                const line = new THREE.Mesh(
+                    new THREE.PlaneGeometry(0.4, 6),
+                    new THREE.MeshBasicMaterial({ color: 0x000000 })
+                );
+                line.rotation.x = -Math.PI/2;
+                line.position.set(0, 0.05, -i * 25);
+                scene.add(line);
+            }
+
+            camera.position.set(0, 5, 10);
+        }
+
+        window.startGame = () => {
+            active = true;
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            if('ontouchstart' in window) document.getElementById('controls').style.display = 'flex';
+            animate();
+        };
+
+        // KONTROLLER
+        window.addEventListener('keydown', (e) => {
+            if(e.code === 'ArrowUp') input.w = true;
+            if(e.code === 'ArrowDown') input.s = true;
+            if(e.code === 'ArrowLeft') input.a = true;
+            if(e.code === 'ArrowRight') input.d = true;
+            if(e.code === 'Space') input.space = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if(e.code === 'ArrowUp') input.w = false;
+            if(e.code === 'ArrowDown') input.s = false;
+            if(e.code === 'ArrowLeft') input.a = false;
+            if(e.code === 'ArrowRight') input.d = false;
+            if(e.code === 'Space') input.space = false;
+        });
+
+        const setupTouch = (id, key) => {
+            const el = document.getElementById(id);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); input[key] = true; });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); input[key] = false; });
+        };
+        setupTouch('l-btn', 'a'); setupTouch('r-btn', 'd'); setupTouch('g-btn', 'w'); setupTouch('b-btn', 'space');
+
+        function animate() {
+            if(!active) return;
+
+            // FİZİK HESAPLAMA
+            if (input.w) speed += 0.008;
+            if (input.s) speed -= 0.005;
+            if (input.space) speed *= 0.94;
+            speed *= 0.985; // Sürtünme
+            
+            if (Math.abs(speed) > 0.01) {
+                const turnSpeed = 0.025;
+                if (input.a) car.rotation.y += turnSpeed;
+                if (input.d) car.rotation.y -= turnSpeed;
+            }
+
+            car.translateZ(-speed);
+
+            // AKICI KAMERA TAKİBİ
+            const offset = new THREE.Vector3(0, 3, 8 + (speed * 4));
+            const camTarget = offset.applyMatrix4(car.matrixWorld);
+            camera.position.lerp(camTarget, 0.1);
+            camera.lookAt(car.position);
+
+            document.getElementById('speedometer').innerText = Math.round(speed * 600) + " KM/H";
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        init();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
+
